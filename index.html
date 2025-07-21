@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberpunk Storyboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.0/Sortable.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.7.2/axios.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #222;
+            color: #fff;
+        }
+        #drop-area {
+            border: 2px dashed #ccc;
+            padding: 20px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        #drop-area.dragover {
+            background: #444;
+        }
+        .scene {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #666;
+            background: #333;
+        }
+        .image-card {
+            display: inline-block;
+            margin: 10px;
+            padding: 10px;
+            background: #444;
+            border: 1px solid #888;
+            text-align: center;
+            width: 200px;
+        }
+        .image-card img {
+            max-width: 180px;
+            max-height: 180px;
+        }
+        .image-card textarea {
+            width: 180px;
+            height: 60px;
+            margin-top: 10px;
+        }
+        .image-card button {
+            margin-top: 5px;
+            background: #0ff;
+            color: #000;
+            border: none;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .copy-btn {
+            background: #f0f;
+        }
+        #add-scene {
+            background: #0f0;
+            color: #000;
+            padding: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="drop-area">Drag and drop images here</div>
+    <button id="add-scene">Add Scene</button>
+    <div id="timeline"></div>
+    <script>
+        // Initialize LocalForage
+        localforage.config({ name: 'storyboard' });
+
+        // Load saved data
+        async function loadData() {
+            const scenes = await localforage.getItem('scenes') || [];
+            const timeline = document.getElementById('timeline');
+            timeline.innerHTML = '';
+            scenes.forEach((scene, sceneIndex) => {
+                const sceneDiv = document.createElement('div');
+                sceneDiv.className = 'scene';
+                sceneDiv.id = `scene-${sceneIndex}`;
+                timeline.appendChild(sceneDiv);
+                scene.images.forEach((imgData, imgIndex) => {
+                    addImageCard(sceneDiv, imgData.src, imgData.description, sceneIndex, imgIndex);
+                });
+                new Sortable(sceneDiv, {
+                    group: 'shared',
+                    animation: 150,
+                    onEnd: saveData
+                });
+            });
+        }
+
+        // Save data to LocalForage
+        async function saveData() {
+            const scenes = [];
+            document.querySelectorAll('.scene').forEach(sceneDiv => {
+                const images = [];
+                sceneDiv.querySelectorAll('.image-card').forEach(card => {
+                    images.push({
+                        src: card.querySelector('img').src,
+                        description: card.querySelector('textarea').value
+                    });
+                });
+                scenes.push({ images });
+            });
+            await localforage.setItem('scenes', scenes);
+        }
+
+        // Add image card to scene
+        function addImageCard(sceneDiv, src, description = '', sceneIndex, imgIndex) {
+            const card = document.createElement('div');
+            card.className = 'image-card';
+            card.innerHTML = `
+                <img src="${src}" alt="Storyboard Image">
+                <textarea placeholder="Description/Prompt">${description}</textarea>
+                <button onclick="generateImage(this, ${sceneIndex}, ${imgIndex})">Generate with Ollama</button>
+                <button class="copy-btn" onclick="copyText(this)">Copy Text</button>
+            `;
+            sceneDiv.appendChild(card);
+            card.querySelector('textarea').addEventListener('input', saveData);
+        }
+
+        // Handle drag-and-drop
+        const dropArea = document.getElementById('drop-area');
+        dropArea.addEventListener('dragover', e => {
+            e.preventDefault();
+            dropArea.className = 'dragover';
+        });
+        dropArea.addEventListener('dragleave', () => {
+            dropArea.className = '';
+        });
+        dropArea.addEventListener('drop', e => {
+            e.preventDefault();
+            dropArea.className = '';
+            const files = e.dataTransfer.files;
+            const sceneDiv = document.querySelector('.scene:last-child') || addScene();
+            Array.from(files).forEach((file, i) => {
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        const scenes = document.querySelectorAll('.scene').length - 1;
+                        addImageCard(sceneDiv, reader.result, '', scenes, i);
+                        saveData();
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+        });
+
+        // Add new scene
+        document.getElementById('add-scene').addEventListener('click', addScene);
+        function addScene() {
+            const timeline = document.getElementById('timeline');
+            const sceneDiv = document.createElement('div');
+            sceneDiv.className = 'scene';
+            sceneDiv.id = `scene-${document.querySelectorAll('.scene').length}`;
+            timeline.appendChild(sceneDiv);
+            new Sortable(sceneDiv, {
+                group: 'shared',
+                animation: 150,
+                onEnd: saveData
+            });
+            saveData();
+            return sceneDiv;
+        }
+
+        // Copy text
+        function copyText(button) {
+            const textarea = button.previousElementSibling;
+            textarea.select();
+            document.execCommand('copy');
+        }
+
+        // Generate image with Ollama
+        async function generateImage(button, sceneIndex, imgIndex) {
+            const textarea = button.previousElementSibling;
+            const prompt = textarea.value;
+            if (!prompt) return alert('Enter a prompt first!');
+            try {
+                const response = await axios.post('http://localhost:11434/api/generate', {
+                    model: 'stable-diffusion', // Replace with your Ollama model
+                    prompt: prompt
+                });
+                const imageData = response.data.image; // Adjust based on Ollama's API response
+                const img = button.previousElementSibling.previousElementSibling;
+                img.src = `data:image/png;base64,${imageData}`;
+                await saveData();
+            } catch (error) {
+                console.error('Ollama Error:', error);
+                alert('Failed to generate image. Ensure Ollama is running.');
+            }
+        }
+
+        // Initialize
+        loadData();
+    </script>
+</body>
+</html>
+```
+
+#### Step 6: Setup Instructions
+1. **Install Ollama**:
+   - Install Ollama:
+     ```bash
+     curl https://ollama.ai/install.sh | sh
+     ```
+   - Start Ollama server:
+     ```bash
+     ollama serve
+     ```
+   - Pull a model (e.g., Stable Diffusion or equivalent):
+     ```bash
+     ollama run stable-diffusion
+     ```
+   - Verify: `curl http://localhost:11434`.
+
+2. **Run the HTML Page**:
+   - Save the artifact as `storyboard.html`.
+   - Open in a browser (e.g., Firefox) via `file:///path/to/storyboard.html` or use a local server:
+     ```bash
+     python -m http.server 8000
+     ```
+     Access: `http://localhost:8000/storyboard.html`.
+
+3. **Usage**:
+   - Drag images onto the drop area.
+   - Click “Add Scene” to create new scene groups.
+   - Drag images between scenes or within a scene to reorder.
+   - Enter descriptions/prompts in text areas, copy/paste as needed.
+   - Click “Generate with Ollama” to create new images (adjust API response handling based on Ollama’s output format).
+   - Data saves automatically to browser storage.
+
+4. **Export PNGs**:
+   - Right-click images in the browser, save as PNGs to `/opt/StabilityMatrix/Data/Packages/ComfyUI/input`.
+
+#### Step 7: Kdenlive Assembly
+1. **Install Kdenlive**:
+   ```bash
+   sudo apt install kdenlive
+   ```
+2. **Import and Arrange**:
+   - Create 1080p 30fps project.
+   - Import PNGs, place on Video 1 track, align with music (e.g., 0:00-0:20 for Scene 1).
+3. **Add Text Descriptions**:
+   - Add Title Clip: e.g., “Scene 1: Cityscape flyover, neon lights, QR: No, Timing: 0:00-0:20”.
+   - Export PDF:
+     ```bash
+     img2pdf *.png -o storyboard.pdf
+     ```
+
+#### Step 8: KlingAI Integration
+- Upload PNGs to KlingAI:
+  - Prompt: “Cyberpunk city flyover, neon lights, raining, smooth pan, 10 seconds.”
+- Import clips to Kdenlive, add QR codes:
+  ```bash
+  qrencode -o qr1.png "https://yoursite.com/track1-lore"
+  ```
+- Sync with music, export MP4.
+
+#### Troubleshooting
+- **Ollama Errors**: Ensure the server is running and the model supports image generation. Adjust the Axios POST request based on Ollama’s API docs.
+- **Local Storage**: Clear via browser dev tools if corrupted (F12 > Application > IndexedDB > localforage).
+- **Drag-and-Drop**: Test in Chrome/Firefox if issues arise.
+- **VRAM**: Your RTX 2080 Ti supports 1024x576.
+
+#### Notes
+- No existing project perfectly matches all requirements, but this solution combines SortableJS, LocalForage, and Axios for a custom fit.
+- Share track length for precise scene timing.
+- The artifact avoids ComfyUI dependencies, ensuring no `huggingface_hub` issues.
