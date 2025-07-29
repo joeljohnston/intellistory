@@ -1,0 +1,125 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+#timeline {
+    height: 150px;
+    border-bottom: 1px solid #ccc;
+}
+#scenes-container {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    height: calc(100vh - 200px);
+    padding: 10px;
+}
+.scene {
+    min-width: 300px;
+    margin: 10px;
+    padding: 10px;
+    border: 1px solid #ddd;
+    background-color: #f9f9f9;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+.frame-container {
+    display: flex;
+    justify-content: space-around;
+    width: 100%;
+}
+.frame {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 10px;
+}
+.frame img {
+    width: 128px;
+    height: 128px;
+    border: 1px solid #ccc;
+    margin-bottom: 10px;
+    cursor: pointer;
+}
+.frame label {
+    font-weight: bold;
+}
+.frame textarea {
+    width: 100%;
+    height: 60px;
+    margin-bottom: 5px;
+}
+.frame button {
+    padding: 5px 10px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+.frame button:hover {
+    background-color: #45a049;
+}
+#add-scene {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    padding: 10px 20px;
+    background-color: #008CBA;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+#add-scene:hover {
+    background-color: #007B9A;
+}
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.9);
+}
+.modal-content {
+    margin: auto;
+    display: block;
+    width: 80%;
+    max-width: 1920px;
+    max-height: 1080px;
+}
+#close-modal {
+    position: absolute;
+    top: 15px;
+    right: 35px;
+    color: #f1f1f1;
+    font-size: 40px;
+    font-weight: bold;
+    cursor: pointer;
+}
+.frame .copy-button {
+    padding: 5px 10px;
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    cursor: pointer;
+    margin-top: 5px;
+}
+.frame .copy-button:hover {
+    background-color: #1976D2;
+}
+.frame .upscale-button {
+    padding: 5px 10px;
+    background-color: #9C27B0;
+    color: white;
+    border: none;
+    cursor: pointer;
+    margin-top: 5px;
+}
+.frame .upscale-button:hover {
+    background-color: #7B1FA2;
+}

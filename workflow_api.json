@@ -1,0 +1,61 @@
+{
+  "1": {
+    "inputs": {
+      "ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple"
+  },
+  "6": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage"
+  },
+  "2": {
+    "inputs": {
+      "text": "",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "7": {
+    "inputs": {
+      "text": "black, dark, blank, low quality, blurry, distorted",
+      "clip": ["1", 1]
+    },
+    "class_type": "CLIPTextEncode"
+  },
+  "3": {
+    "inputs": {
+      "model": ["1", 0],
+      "positive": ["2", 0],
+      "negative": ["7", 0],
+      "latent_image": ["6", 0],
+      "width": 1024,
+      "height": 1024,
+      "steps": 20,
+      "cfg": 5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.7,
+      "seed": 12345
+    },
+    "class_type": "KSampler"
+  },
+  "4": {
+    "inputs": {
+      "samples": ["3", 0],
+      "vae": ["1", 2]
+    },
+    "class_type": "VAEDecode"
+  },
+  "5": {
+    "inputs": {
+      "images": ["4", 0],
+      "filename_prefix": "intellistory_full"
+    },
+    "class_type": "SaveImage"
+  }
+}

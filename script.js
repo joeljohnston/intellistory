@@ -1,0 +1,353 @@
+const SCENE_DURATION = 10 * 1000;
+let sceneCount = 0;
+let currentTime = 0;
+const baseDate = new Date('1970-01-01T00:00:00Z');
+
+// vis.js Timeline setup
+const container = document.getElementById('timeline');
+const items = new vis.DataSet();
+const options = {
+    start: baseDate,
+    end: new Date(baseDate.getTime() + 60 * 1000),
+    format: {
+        minorLabels: { millisecond: 'SSS', second: 's', minute: 'mm:ss', hour: 'HH:mm:ss' },
+        majorLabels: { millisecond: 'HH:mm:ss', second: 'HH:mm:ss', minute: 'mm:ss', hour: 'HH:mm:ss' }
+    },
+    height: '150px',
+    orientation: 'top',
+    showCurrentTime: false
+};
+const timeline = new vis.Timeline(container, items, options);
+
+// Modal setup
+const modal = document.getElementById('modal');
+const modalImage = document.getElementById('modal-image');
+const closeModal = document.getElementById('close-modal');
+closeModal.onclick = () => modal.style.display = 'none';
+window.onclick = (event) => { if (event.target == modal) modal.style.display = 'none'; };
+
+// Add a scene
+function addScene() {
+    sceneCount++;
+    const sceneId = `scene-${sceneCount}`;
+    const startTime = new Date(baseDate.getTime() + currentTime);
+    const endTime = new Date(startTime.getTime() + SCENE_DURATION);
+    currentTime += SCENE_DURATION;
+
+    items.add({
+        id: sceneId,
+        content: `Scene ${sceneCount}`,
+        start: startTime,
+        end: endTime,
+        type: 'range'
+    });
+
+    timeline.setOptions({ end: new Date(baseDate.getTime() + currentTime + 10 * 1000) });
+
+    const sceneDiv = document.createElement('div');
+    sceneDiv.className = 'scene';
+    sceneDiv.id = sceneId;
+    sceneDiv.innerHTML = `
+        <div class="frame-container">
+            <div class="frame">
+                <img id="${sceneId}-first-img" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ==" alt="Blank First Frame">
+                <label>1st Frame</label>
+                <textarea placeholder="Describe the first frame..."></textarea>
+                <button onclick="generateImage(this, '${sceneId}-first')">Generate</button>
+                <button class="copy-button" onclick="copyToClipboard('${sceneId}-first')">Copy</button>
+                <button class="upscale-button" onclick="upscaleImage('${sceneId}-first')">Upscale</button>
+            </div>
+            <div class="frame">
+                <img id="${sceneId}-last-img" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQ==" alt="Blank Last Frame">
+                <label>Last Frame</label>
+                <textarea placeholder="Describe the last frame..."></textarea>
+                <button onclick="generateImage(this, '${sceneId}-last')">Generate</button>
+                <button class="copy-button" onclick="copyToClipboard('${sceneId}-last')">Copy</button>
+                <button class="upscale-button" onclick="upscaleImage('${sceneId}-last')">Upscale</button>
+            </div>
+        </div>
+    `;
+    document.getElementById('scenes-container').appendChild(sceneDiv);
+    console.log('DOM IDs after append:', Array.from(document.querySelectorAll('[id]')).map(el => el.id));
+
+    // Add click event to images after generation
+    saveData();
+}
+
+// Generate full-size image (1024x1024) and create thumbnail
+async function generateImage(button, frameId) {
+    const textarea = button.previousElementSibling;
+    const prompt = textarea.value;
+    if (!prompt) {
+        alert('Please enter a prompt.');
+        return;
+    }
+
+    try {
+        // Enhance prompt with LLaVA via Ollama
+        const llavaResponse = await axios.post('http://localhost:11434/api/generate', {
+            model: 'llava',
+            prompt: `Enhance this prompt for image generation: ${prompt}`,
+            stream: false
+        });
+        const enhancedPrompt = llavaResponse.data.response || prompt;
+        console.log('Enhanced prompt:', enhancedPrompt);
+
+        // Check ComfyUI connectivity
+        try {
+            const ping = await axios.get('http://localhost:8188', { timeout: 5000 });
+            console.log('ComfyUI ping status:', ping.status);
+        } catch (pingError) {
+            throw new Error('ComfyUI not reachable: ' + pingError.message);
+        }
+
+        // Submit to ComfyUI for full-size (1024x1024)
+        const response = await axios.post('http://localhost:8188/prompt', {
+            prompt: {
+                "1": { "inputs": { "ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors" }, "class_type": "CheckpointLoaderSimple" },
+                "6": { "inputs": { "width": 1024, "height": 1024, "batch_size": 1 }, "class_type": "EmptyLatentImage" },
+                "2": { "inputs": { "text": enhancedPrompt, "clip": ["1", 1] }, "class_type": "CLIPTextEncode" },
+                "7": { "inputs": { "text": "black, dark, blank, low quality, blurry, distorted", "clip": ["1", 1] }, "class_type": "CLIPTextEncode" },
+                "3": { "inputs": { "model": ["1", 0], "positive": ["2", 0], "negative": ["7", 0], "latent_image": ["6", 0], "width": 1024, "height": 1024, "steps": 20, "cfg": 5, "sampler_name": "euler", "scheduler": "normal", "denoise": 0.7, "seed": Math.floor(Math.random() * 1000000) }, "class_type": "KSampler" },
+                "4": { "inputs": { "samples": ["3", 0], "vae": ["1", 2] }, "class_type": "VAEDecode" },
+                "5": { "inputs": { "images": ["4", 0], "filename_prefix": "intellistory_full" }, "class_type": "SaveImage" }
+            }
+        }, { headers: { 'Origin': 'http://localhost:8000' } });
+
+        const jobId = response.data.prompt_id;
+        if (!jobId) throw new Error('No prompt_id returned');
+
+        // Poll for result
+        let imageData;
+        for (let i = 0; i < 30; i++) {
+            const status = await axios.get(`http://localhost:8188/history/${jobId}`);
+            if (status.data[jobId]?.outputs?.[5]?.images?.[0]) {
+                imageData = status.data[jobId].outputs[5].images[0];
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        if (!imageData) throw new Error('Image generation timed out');
+
+        // Fetch full-size image
+        const imageResponse = await axios.get(`http://localhost:8188/view?filename=${imageData.filename}`, {
+            responseType: 'arraybuffer'
+        });
+        const base64FullImage = btoa(
+            new Uint8Array(imageResponse.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+
+        // Create thumbnail (512x512) and scale to 128x128 for display
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        img.onload = () => {
+            const tempCanvas = document.createElement('canvas');
+            const tempCtx = tempCanvas.getContext('2d');
+            tempCanvas.width = 512;
+            tempCanvas.height = 512;
+            tempCtx.drawImage(img, 0, 0, 512, 512);
+            const base64ThumbnailData = tempCanvas.toDataURL('image/png');
+
+            canvas.width = 128;
+            canvas.height = 128;
+            ctx.drawImage(tempCanvas, 0, 0, 128, 128);
+            const base64ThumbnailDisplay = canvas.toDataURL('image/png');
+
+            const thumbnailImgId = `${frameId}-img`; // Correctly construct the full ID
+            const thumbnailImg = document.getElementById(thumbnailImgId);
+            if (thumbnailImg) {
+                thumbnailImg.src = base64ThumbnailDisplay;
+                thumbnailImg.dataset.fullResSrc = base64FullImage;
+                console.log(`Image data set for ${thumbnailImgId}`);
+                // Attach click event after image is loaded
+                thumbnailImg.onclick = () => { console.log(`Clicked ${thumbnailImgId}`); upscaleOnClick(thumbnailImgId); };
+                const copyButton = thumbnailImg.parentElement.querySelector('.copy-button');
+                if (copyButton) copyButton.onclick = () => copyToClipboard(frameId);
+                const upscaleButton = thumbnailImg.parentElement.querySelector('.upscale-button');
+                if (upscaleButton) upscaleButton.onclick = () => upscaleImage(frameId);
+            } else {
+                console.error(`Thumbnail image not found for ${thumbnailImgId}. FrameId: ${frameId}, Current DOM IDs:`, Array.from(document.querySelectorAll('[id]')).map(el => el.id));
+            }
+            // Ensure DOM is ready with a requestAnimationFrame
+            requestAnimationFrame(() => {
+                const verifyImg = document.getElementById(thumbnailImgId);
+                if (!verifyImg) {
+                    console.error(`Thumbnail image still not found after rAF for ${thumbnailImgId}. FrameId: ${frameId}, Current DOM IDs:`, Array.from(document.querySelectorAll('[id]')).map(el => el.id));
+                }
+            });
+        };
+        img.src = `data:image/png;base64,${base64FullImage}`;
+    } catch (error) {
+        console.error('Error generating image:', error.response ? error.response.data : error.message);
+        alert(`Failed to generate image: ${error.message}. Check ComfyUI logs and ensure it’s running with --enable-cors-header="*".`);
+    }
+}
+
+// Upscale on click to 1920x1080 using ComfyUI
+async function upscaleOnClick(imgId) {
+    console.log(`Upscaling ${imgId}`);
+    const img = document.getElementById(imgId);
+    if (!img || !img.dataset.fullResSrc) {
+        console.error('Image or fullResSrc not found for upscaling:', img);
+        alert('Image not available for upscaling.');
+        return;
+    }
+
+    try {
+        // Extract existing image data for upscaling
+        const base64Image = img.dataset.fullResSrc;
+
+        // Submit to ComfyUI for upscaling to 1920x1080
+        const response = await axios.post('http://localhost:8188/prompt', {
+            prompt: {
+                "1": { "inputs": { "ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors" }, "class_type": "CheckpointLoaderSimple" },
+                "8": { "inputs": { "image": base64Image }, "class_type": "LoadImage" }, // Load existing image
+                "9": { "inputs": { "images": ["8", 0], "width": 1920, "height": 1080 }, "class_type": "ImageUpscale" }, // Requires custom node
+                "5": { "inputs": { "images": ["9", 0], "filename_prefix": "intellistory_upscaled" }, "class_type": "SaveImage" }
+            }
+        }, { headers: { 'Origin': 'http://localhost:8000' } });
+
+        const jobId = response.data.prompt_id;
+        if (!jobId) throw new Error('No prompt_id returned for upscaling');
+
+        // Poll for result
+        let upscaledImageData;
+        for (let i = 0; i < 30; i++) {
+            const status = await axios.get(`http://localhost:8188/history/${jobId}`);
+            if (status.data[jobId]?.outputs?.[5]?.images?.[0]) {
+                upscaledImageData = status.data[jobId].outputs[5].images[0];
+                break;
+            }
+            await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+        if (!upscaledImageData) throw new Error('Upscaling timed out');
+
+        // Fetch upscaled image
+        const upscaledImageResponse = await axios.get(`http://localhost:8188/view?filename=${upscaledImageData.filename}`, {
+            responseType: 'arraybuffer'
+        });
+        const upscaledBase64 = btoa(
+            new Uint8Array(upscaledImageResponse.data).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+
+        // Update the image source with upscaled version
+        img.dataset.fullResSrc = upscaledBase64;
+        modalImage.src = upscaledBase64;
+        modal.style.display = 'block';
+        alert('Image upscaled to 1920x1080!');
+    } catch (error) {
+        console.error('Error upscaling image:', error.response ? error.response.data : error.message);
+        alert(`Failed to upscale image: ${error.message}. Ensure ComfyUI has an upscaling node (e.g., Ultimate SD Upscale) and check logs.`);
+    }
+}
+
+// Copy to clipboard
+function copyToClipboard(frameId) {
+    const img = document.getElementById(`${frameId}-img`);
+    if (!img || !img.dataset.fullResSrc) {
+        alert('Full-size image not available to copy.');
+        return;
+    }
+
+    navigator.clipboard.writeText(img.dataset.fullResSrc).then(() => {
+        alert('Full-size image data copied to clipboard!');
+    }, (err) => {
+        console.error('Failed to copy: ', err);
+        alert('Failed to copy image data to clipboard.');
+    });
+}
+
+// Upscale image to 1920x1080 using Ollama (placeholder, retained for reference)
+async function upscaleImage(frameId) {
+    const img = document.getElementById(`${frameId}-img`);
+    if (!img || !img.dataset.fullResSrc) {
+        alert('Image not available to upscale.');
+        return;
+    }
+
+    try {
+        // Note: Ollama doesn't natively support upscaling. This is a placeholder; use upscaleOnClick instead.
+        alert('Upscaling via Ollama is not supported. Use the click action for ComfyUI upscaling.');
+    } catch (error) {
+        console.error('Error with Ollama upscaling:', error.response ? error.response.data : error.message);
+        alert(`Failed to upscale via Ollama: ${error.message}. Consider using ComfyUI upscaling instead.`);
+    }
+}
+
+// Drag and drop reordering
+new Sortable(document.getElementById('scenes-container'), {
+    animation: 150,
+    onEnd: function () {
+        reorderTimeline();
+        saveData();
+    }
+});
+
+// Reorder timeline
+function reorderTimeline() {
+    let time = 0;
+    const scenes = Array.from(document.querySelectorAll('.scene'));
+    scenes.forEach(scene => {
+        const item = items.get(scene.id);
+        if (item) {
+            item.start = new Date(baseDate.getTime() + time);
+            item.end = new Date(item.start.getTime() + SCENE_DURATION);
+            items.update(item);
+            time += SCENE_DURATION;
+        }
+    });
+    currentTime = time;
+    timeline.setOptions({ end: new Date(baseDate.getTime() + currentTime + 10 * 1000) });
+}
+
+// Local storage
+const storage = localforage.createInstance({ name: 'intellistory' });
+
+async function saveData() {
+    const scenesHTML = document.getElementById('scenes-container').innerHTML;
+    await storage.setItem('scenes', scenesHTML);
+    await storage.setItem('sceneCount', sceneCount);
+    await storage.setItem('currentTime', currentTime);
+}
+
+async function loadData() {
+    const savedScenes = await storage.getItem('scenes');
+    if (savedScenes) {
+        document.getElementById('scenes-container').innerHTML = savedScenes;
+        sceneCount = await storage.getItem('sceneCount') || 0;
+        currentTime = await storage.getItem('currentTime') || 0;
+        let time = 0;
+        const scenes = Array.from(document.querySelectorAll('.scene'));
+        scenes.forEach(scene => {
+            const sceneNum = parseInt(scene.id.split('-')[1]);
+            items.add({
+                id: scene.id,
+                content: `Scene ${sceneNum}`,
+                start: new Date(baseDate.getTime() + time),
+                end: new Date(baseDate.getTime() + time + SCENE_DURATION),
+                type: 'range'
+            });
+            time += SCENE_DURATION;
+        });
+        currentTime = time;
+        timeline.setOptions({ end: new Date(baseDate.getTime() + currentTime + 10 * 1000) });
+        // Re-attach click, copy, and upscale events to loaded images
+        const images = document.querySelectorAll('.frame img');
+        images.forEach(img => {
+            const frameId = img.id.replace('-img', '');
+            console.log(`Attaching events to ${img.id}`);
+            if (img && img.dataset.fullResSrc) img.onclick = () => { console.log(`Clicked ${img.id}`); upscaleOnClick(img.id); };
+            const copyButton = img.parentElement.querySelector('.copy-button');
+            if (copyButton) copyButton.onclick = () => copyToClipboard(frameId);
+            const upscaleButton = img.parentElement.querySelector('.upscale-button');
+            if (upscaleButton) upscaleButton.onclick = () => upscaleImage(frameId);
+        });
+    }
+}
+
+// Event listeners
+document.getElementById('add-scene').addEventListener('click', addScene);
+
+// Load data
+loadData();
