@@ -154,7 +154,7 @@ async function generateImage(button, frameId) {
             ctx.drawImage(tempCanvas, 0, 0, 128, 128);
             const base64ThumbnailDisplay = canvas.toDataURL('image/png');
 
-            const thumbnailImgId = `${frameId}-img`; // Correctly construct the full ID
+            const thumbnailImgId = `${frameId}-img`; // Ensure correct ID
             const thumbnailImg = document.getElementById(thumbnailImgId);
             if (thumbnailImg) {
                 thumbnailImg.src = base64ThumbnailDisplay;
@@ -169,13 +169,13 @@ async function generateImage(button, frameId) {
             } else {
                 console.error(`Thumbnail image not found for ${thumbnailImgId}. FrameId: ${frameId}, Current DOM IDs:`, Array.from(document.querySelectorAll('[id]')).map(el => el.id));
             }
-            // Ensure DOM is ready with a requestAnimationFrame
-            requestAnimationFrame(() => {
+            // Add a delay to ensure DOM stability
+            setTimeout(() => {
                 const verifyImg = document.getElementById(thumbnailImgId);
                 if (!verifyImg) {
-                    console.error(`Thumbnail image still not found after rAF for ${thumbnailImgId}. FrameId: ${frameId}, Current DOM IDs:`, Array.from(document.querySelectorAll('[id]')).map(el => el.id));
+                    console.error(`Thumbnail image still not found after delay for ${thumbnailImgId}. FrameId: ${frameId}, Current DOM IDs:`, Array.from(document.querySelectorAll('[id]')).map(el => el.id));
                 }
-            });
+            }, 200);
         };
         img.src = `data:image/png;base64,${base64FullImage}`;
     } catch (error) {
